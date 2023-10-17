@@ -1,0 +1,42 @@
+# Get the 3 to 1 testing training split working 3 prior seasons
+# training and testing on following season
+# Get the sliding door approach working
+# Predict home goals with weighted historical (season)
+# averges of home attack and of away defence
+# Predict away goals with weighted histrical (season)
+# averges of away attack and home defence
+
+# Get each team in a game to look back through all of their
+# previous season games according to date and average the
+# defence stats and attack stats
+
+# Training works by, running the model over the data, 
+# with the highest possible accuracy being gotten given there are,
+# limitations within models it will not be 100%, may be 85%+
+# Then this accuracy value can be compared with the test data
+# accuracy to measure overfitting
+
+# Need to produce a new dataframe which has the predicted goals for
+# and against for every game, in train and testing, then compare
+# this will compare scores, results accuracy can be computed after this.
+
+# Might it be hard to use home/away as a variable given this won't
+# average out to show anything meaningful, could model this separately
+# will be best to use interaction terms, so don't have a home/away
+# variable only have Home=1, Away=0, xG*Home and then the split in
+# using xG to predict future goals will be done by the model, the model
+# will discover how much previous xG average at home is predictive
+
+
+def seasons_splitting
+
+def compute_averages
+
+def sliding_door_averages
+
+def estimate_goals_results_through_season
+
+def compare_accuracy_predictions_goals_vs_goals_one_season
+
+def produce_accuracy_across_splits_train_test
+

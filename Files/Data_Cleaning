@@ -1,0 +1,184 @@
+# This file should combine the stats and odds data
+# dropping unecessary columns and combining games
+# Split the columns which are relevant to
+# defending & attacking
+
+import pandas as pd
+from fuzzywuzzy import process
+
+
+def load_dataframes():
+    """Load dataframes from CSV files."""
+    results_stats = pd.read_csv("matches.csv")
+    odds_results = pd.read_csv("E0-2.csv")
+    return results_stats, odds_results
+
+
+def align_team_names(df):
+    team_names = df['team'].unique()
+    opponent_names = df['opponent'].unique()
+
+    name_map = {}
+
+    for opponent_name in opponent_names:
+        closest_match, score = process.extractOne(opponent_name, team_names)
+        if score > 60:  # adjust the threshold as needed
+            name_map[opponent_name] = closest_match
+
+    df['opponent'] = df['opponent'].replace(name_map)
+    
+    # Ensure that after the mapping, there are no unmatched names
+    unmatched_names = set(df['opponent'].unique()) - set(team_names)
+    if unmatched_names:
+        print("Warning: These opponent names did not match any team names:")
+        for name in unmatched_names:
+            print(name)
+
+    # Check unique team and opponent names for each season
+    seasons = df['season'].unique()
+    for season in seasons:
+        season_data = df[df['season'] == season]
+        unique_teams_for_season = season_data['team'].nunique()
+        unique_opponents_for_season = season_data['opponent'].nunique()
+        
+        matched_names_for_season = [opponent for opponent, team in name_map.items() if team in season_data['team'].unique()]
+        
+        if unique_teams_for_season != 20 or unique_opponents_for_season != 20:
+            print(f"Warning: For season {season}:")
+            if unique_teams_for_season != 20:
+                print(f"There are {unique_teams_for_season} unique team names.")
+            if unique_opponents_for_season != 20:
+                print(f"There are {unique_opponents_for_season} unique opponent names.")
+            print("Matched names for this season:")
+            for name in matched_names_for_season:
+                print(f"'{name}' matched with '{name_map[name]}'")
+
+    return df
+
+
+def merge_on_date_and_opponent(df):
+    """Merge rows based on date and opponent."""
+    opp_df = df.copy()
+
+    # Renaming the columns of opp_df, excluding 'date', 'team', and 'opponent'
+    opp_columns = ['opp_' + col if col not in ['date', 'team', 'opponent'] else col for col in opp_df.columns]
+    opp_df.columns = opp_columns
+
+    # Merge based on 'date' and 'opponent'
+    merged_df = pd.merge(df, opp_df, left_on=['date', 'opponent'], right_on=['date', 'team'])
+
+    # Optionally, drop redundant columns
+    merged_df.reset_index(drop=True, inplace=True)
+    
+    return merged_df
+
+def remove_duplicate_columns(df):
+    """Remove columns that have the same values as another column."""
+    # List of columns to drop
+    columns_to_drop = []
+    
+    # Compare each column against every other column
+    for i, col1 in enumerate(df.columns):
+        for col2 in df.columns[i+1:]:
+            # If the columns have the same values throughout, and the second column is not already marked for dropping
+            if df[col1].equals(df[col2]) and col2 not in columns_to_drop:
+                columns_to_drop.append(col2)
+    
+    # Drop the duplicate columns
+    df = df.drop(columns=columns_to_drop)
+    return df
+
+def remove_constant_columns(df):
+    """Remove columns that have a constant value throughout."""
+    columns_to_drop = [col for col in df.columns if df[col].nunique() == 1]
+    return df.drop(columns=columns_to_drop)
+
+def drop_selected_columns(df):
+    columns_to_drop = ["Unnamed: 0", "captain","attendance",
+                "referee", "notes", "opp_Unnamed: 0", "opp_captain"]
+    return df.drop(columns=columns_to_drop)
+
+def remove_and_sort_duplicate_rows(df):
+    """Remove duplicate rows based on date and matchup and sort by date."""
+    
+    # Create a sorted matchup column
+    df['sorted_matchup'] = df.apply(lambda x: tuple(sorted([x['team_x'], x['opponent_x']])), axis=1)
+    
+    # Drop duplicates
+    df = df.drop_duplicates(subset=['date', 'sorted_matchup'])
+    
+    # Drop the sorted matchup column
+    df = df.drop(columns=['sorted_matchup'])
+    
+    # Sort by date
+    df = df.sort_values(by='date')
+    
+    return df
+
+
+def reorder_columns(df):
+    """Reorder columns based on the predefined ordered_columns list."""
+    ordered_columns = [
+    "date", "time", "round", "day", "venue", "result", "gf", "team_x", "opponent_x",
+    "xg", "formation", "poss", "sh", "sot", "dist", "fk", "pk", "pkatt", "npxg", "npxg/sh", 
+    "g-xg", "cmp_4", "cmp_4.1", "cmp_4.2", "cmp_4.3", "att_4", "att_4.1", "att_4.2", 
+    "att_4.3", "cmp%_4", "cmp%_4.1", "cmp%_4.2", "cmp%_4.3", "ast", "xa", "kp", "1/3", 
+    "ppa", "crspa", "prgp", "ga", "xga",
+    "opp_venue", "opp_result", "opp_poss", "opp_formation", "opp_sh", "opp_sot", "opp_dist", 
+    "opp_fk", "opp_pk", "opp_pkatt", "opp_npxg", "opp_npxg/sh", "opp_g-xg", "opp_cmp_4", 
+    "opp_cmp_4.1", "opp_cmp_4.2", "opp_cmp_4.3", "opp_att_4", "opp_att_4.1", "opp_att_4.2", 
+    "opp_att_4.3", "opp_cmp%_4", "opp_cmp%_4.1", "opp_cmp%_4.2", "opp_cmp%_4.3", "opp_ast", 
+    "opp_xa", "opp_kp", "opp_1/3", "opp_ppa", "opp_crspa", "opp_prgp"]
+    
+    # Filter out any columns in ordered_columns that aren't present in df
+    ordered_columns = [col for col in ordered_columns if col in df.columns]
+
+    # Reorder df based on ordered_columns
+    df = df[ordered_columns]
+    return df
+
+def convert_time_to_category(time_str):
+    """Convert a time string into a categorical string."""
+    try:
+        hour = int(time_str.split(":")[0])
+        
+        if hour < 13:
+            return "Early"
+        elif 13 <= hour < 17:
+            return "Afternoon"
+        else:
+            return "Evening"
+    except:
+        return time_str  # if the conversion fails, return the original string
+
+def map_time_column(df):
+    """Map the time values in the dataframe to categories."""
+    df['time'] = df['time'].apply(convert_time_to_category)
+    return df
+
+
+def main():
+    # Load datasets
+    results_stats, odds_results = load_dataframes()
+    
+    # Align team names
+    results_stats = align_team_names(results_stats)
+    
+    # Merge based on date and opponent
+    merged_df = merge_on_date_and_opponent(results_stats)
+    
+    # Apply time mapping
+    merged_df = map_time_column(merged_df)
+    
+    merged_df = remove_duplicate_columns(merged_df)
+    merged_df = remove_constant_columns(merged_df)
+    merged_df = drop_selected_columns(merged_df)
+    merged_df = reorder_columns(merged_df)
+    merged_df = remove_and_sort_duplicate_rows(merged_df)
+    
+    # Save to CSV
+    merged_df.to_csv("merged_results.csv")
+
+if __name__ == "__main__":
+    main()
+

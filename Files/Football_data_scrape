@@ -1,0 +1,136 @@
+import requests
+from bs4 import BeautifulSoup
+import pandas as pd
+import time
+
+BASE_URL = 'https://fbref.com'
+
+
+def get_team_urls_from_standings(standings_url, year):
+    data = requests.get(standings_url)
+    soup = BeautifulSoup(data.text, 'html.parser')
+    
+    # Dynamically select the table based on the year
+    table_id = "results" + year + "91_overall"
+    print(f"Constructed table ID: {table_id}")  # Add this for debugging
+    print(f"URL being scraped: {standings_url}")  # Add this for debugging
+    
+    # Try to select the table
+    standings_tables = soup.select(f'table#{table_id}')
+    
+    if not standings_tables:  # Add this for graceful handling
+        print(f"Table with ID: {table_id} not found in URL: {standings_url}")
+        return [], ""
+
+    standings_table = standings_tables[0]
+    links = [l.get("href") for l in standings_table.find_all('a')]
+    team_urls = [f"{BASE_URL}{l}" for l in links if '/squads/' in l]
+    previous_season = soup.select("a.prev")[0].get("href")
+    return team_urls, f"{BASE_URL}{previous_season}"
+
+
+
+
+def get_team_data(team_url, year):
+    data = requests.get(team_url)
+    soup = BeautifulSoup(data.text, 'html.parser')
+    team_name = team_url.split("/")[-1].replace("-Stats", "").replace("-", " ")
+
+    matches = pd.read_html(data.text, match="Scores & Fixtures")[0]
+
+    links = [l.get("href") for l in soup.find_all('a')]
+    shooting_link = next((f"{BASE_URL}{l}" for l in links if l and 'all_comps/shooting/' in l), None)
+    passing_link = next((f"{BASE_URL}{l}" for l in links if l and 'all_comps/passing/' in l), None)
+
+    if not shooting_link:
+        print(f"No shooting link found for {team_url}. Skipping...")
+        return None
+    if not passing_link:
+        print(f"No passing link found for {team_url}. Skipping...")
+        return None
+
+    shooting_data = requests.get(shooting_link)
+    if "Shooting" not in shooting_data.text:
+        return None
+    time.sleep(2)
+    passing_data = requests.get(passing_link)
+    if "Passing" not in passing_data.text:
+        return None
+
+    try:
+        shooting = pd.read_html(shooting_data.text, match="Shooting")[0]
+        shooting.columns = shooting.columns.droplevel()
+    except ValueError:
+        return None
+    try:
+        passing = pd.read_html(passing_data.text, match="Passing")[0]
+        passing.columns = passing.columns.droplevel()
+    except ValueError:
+        return None
+
+    team_data = matches.merge(shooting[["Date", "Sh", "SoT", "Dist", "FK", "PK", "PKatt", "npxG", "npxG/Sh", "G-xG"]], on="Date")
+
+    selected_passing_columns = ['Date', 'Cmp',
+    'Att', 'Cmp%',
+    'Ast', 'xA', 'KP', '1/3', 'PPA', 
+    'CrsPA', 'PrgP'
+    ]
+    team_data = team_data.merge(passing[selected_passing_columns], on="Date")
+    team_data = team_data[team_data["Comp"] == "Premier League"]
+    team_data["Season"] = year
+    team_data["Team"] = team_name
+
+    return team_data
+
+def rename_passing_columns(passing_df):
+    # Identify columns based on common substrings
+    cmp_cols = [col for col in passing_df.columns if 'Cmp' in col and not '.' in col and not '%' in col]
+    att_cols = [col for col in passing_df.columns if 'Att' in col and not 'Attendance' in col and not '.' in col]
+    cmp_percent_cols = [col for col in passing_df.columns if 'Cmp%' in col]
+    
+    # Create renaming dictionary
+    rename_dict = {}
+    
+    for i in range(len(cmp_cols)):
+        rename_dict[cmp_cols[i]] = f'Cmp_{i+1}'
+        rename_dict[att_cols[i]] = f'Att_{i+1}'
+        rename_dict[cmp_percent_cols[i]] = f'Cmp%_{i+1}'
+    
+    # Rename columns in the dataframe
+    renamed_df = passing_df.rename(columns=rename_dict)
+    
+    return renamed_df
+
+def main():
+    years = ["2022-2023", "2021-2022", "2020-2021", "2019-2020", "2018-2019", "2017-2018"]
+    all_matches = []
+
+    for year in years:
+        # Adjust the current_standings_url to be inside the loop to use the correct 'year'
+        current_standings_url = f'{BASE_URL}/en/comps/9/{year}/{year}-Premier-League-Stats'
+
+        team_urls, previous_standings_url = get_team_urls_from_standings(current_standings_url, year)
+
+        scraped_teams_for_year = []  # List to store team names scraped for the year
+        for team_url in team_urls:
+            team_data = get_team_data(team_url, year)
+            if team_data is not None:
+                all_matches.append(team_data)
+                scraped_teams_for_year.append(team_data["Team"].iloc[0])  # Append the team name for the year
+                time.sleep(2)
+
+        # Check if there are 20 unique team names for the year
+        unique_teams = set(scraped_teams_for_year)
+        if len(unique_teams) != 20:
+            print(f"Warning: For season {year}, {len(unique_teams)} unique team names were scraped instead of 20.")
+            print("Scraped team names:", ", ".join(unique_teams))
+
+    match_df = pd.concat(all_matches)
+    match_df = rename_passing_columns(match_df)
+    match_df.columns = [c.lower() for c in match_df.columns]
+    print(match_df.columns)
+    match_df.to_csv("matches.csv")
+
+if __name__ == "__main__":
+    main()
+
